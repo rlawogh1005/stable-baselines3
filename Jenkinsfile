@@ -114,13 +114,13 @@ pipeline {
                     echo "========================================================"
                     echo "   [DEBUG] FINAL PAYLOAD TO BACKEND"
                     echo "========================================================"
-                    echo "1. Target Endpoint: ${env.SWV_BACKEND_URL}/code-analysis"
+                    echo "1. Target Endpoint: ${env.SWV_BACKEND_URL}/team-project"
                     echo "2. Payload Preview:"
                     echo payloadString
                     echo "========================================================"
 
                     // 6. 백엔드로 전송
-                    def backendUrl = "${env.SWV_BACKEND_URL}/code-analysis"
+                    def backendUrl = "${env.SWV_BACKEND_URL}/team-project"
                     
                     sh """
                         curl -X POST "${backendUrl}" \
