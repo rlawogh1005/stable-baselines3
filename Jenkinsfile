@@ -87,28 +87,40 @@ pipeline {
                         -H "accept: application/json"
                     """, returnStdout: true).trim()
 
+                    // 2. 데이터 파싱 (readJSON 사용 - 안전함)
                     def rawResults = readJSON text: pyExamineResponse
                     
-                    // [핵심] 백엔드 DTO(CreateAnalysisDto) 구조에 맞춰 데이터 포장
+                    // 3. Payload 구성
                     def mergedPayload = [
-                        teamName: "stable-baselines3",        // @IsString() teamName
-                        jenkinsJobName: env.JOB_NAME,         // @IsString() jenkinsJobName
+                        teamName: "stable-baselines3", 
+                        jenkinsJobName: env.JOB_NAME,
                         analysis: [
-                            jobName: env.JOB_NAME,            // @IsString() jobName
-                            buildNumber: env.BUILD_NUMBER.toInteger(), // @IsInt() buildNumber (형변환 필수)
-                            status: qualityGateResult.status,              // @IsString() status (PyExamine 단계이므로 임의값 설정)
-                            buildUrl: env.BUILD_URL,          // @IsString() buildUrl
-                            commitHash: sh(returnStdout: true, script: 'git rev-parse HEAD').trim(), // @IsString() commitHash
-                            pyExamineResults: rawResults      
+                            jobName: env.JOB_NAME,
+                            buildNumber: env.BUILD_NUMBER.toInteger(),
+                            status: "COMPLETED", 
+                            buildUrl: env.BUILD_URL,
+                            commitHash: sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
+                            pyExamineResults: rawResults
                         ]
                     ]
-                    
-                    def finalJson = groovy.json.JsonOutput.toJson(mergedPayload)
 
-                    // 3. 백엔드로 전송 (엔드포인트 수정: code-analysis)
-                    def backendUrl = "${env.SWV_BACKEND_URL}/code-analysis/results"
+                    // [핵심 수정] 4. 파일 저장 및 JSON 생성 (writeJSON 사용)
+                    // groovy.json.JsonOutput 대신 writeJSON 단계를 사용하여 StackOverflow 방지
+                    writeJSON file: 'final_payload.json', json: mergedPayload, pretty: 4
                     
-                    writeFile file: 'final_payload.json', text: finalJson
+                    // 5. 로깅을 위해 파일 내용을 다시 읽음 (직렬화 부하 없음)
+                    def payloadString = readFile 'final_payload.json'
+                    
+                    echo "========================================================"
+                    echo "   [DEBUG] FINAL PAYLOAD TO BACKEND"
+                    echo "========================================================"
+                    echo "1. Target Endpoint: ${env.SWV_BACKEND_URL}/code-analysis/results"
+                    echo "2. Payload Preview:"
+                    echo payloadString
+                    echo "========================================================"
+
+                    // 6. 백엔드로 전송
+                    def backendUrl = "${env.SWV_BACKEND_URL}/code-analysis/results"
                     
                     sh """
                         curl -X POST "${backendUrl}" \
