@@ -12,16 +12,16 @@ pipeline {
 
     environment {
         // [자동 설정] SonarQube 키를 Jenkins Job 이름으로 설정
-        SONAR_PROJECT_KEY  = "${env.JOB_NAME}"
+        SONAR_PROJECT_KEY="${env.JOB_NAME}"
         
         // [주의] 백엔드 API 경로 확인 필요 (로그상 404 발생함)
-        SWV_BACKEND_URL    = 'http://mp-backend:3000/api/team-projects'
-        PYEXAMINE_URL      = 'http://pyexamine-service:8000/analyze'
+        SWV_BACKEND_URL='http://mp-backend:3000/api/team-projects'
+        PYEXAMINE_URL='http://pyexamine-service:8000/analyze'
 
-        SONAR_SERVER       = 'SonarQube-Server'
-        SONAR_CREDENTIALS  = 'SONAR_QUBE_TOKEN'
-        SWV_CREDENTIALS    = 'SWV_BACKEND_TOKEN_ID'
-        PYTHONIOENCODING   = 'utf-8'
+        SONAR_SERVER='SonarQube-Server'
+        SONAR_CREDENTIALS='SONAR_QUBE_TOKEN'
+        SWV_CREDENTIALS='SWV_BACKEND_TOKEN_ID'
+        PYTHONIOENCODING='utf-8'
     }
     
     // [참고] tools 블록은 유지하되, 실제 실행은 경로를 받아와서 수행함
@@ -55,7 +55,7 @@ pipeline {
                     echo ">>> Starting PyExamine Analysis..."
                     sh 'zip -r source_code.zip . -x "*.git*" "__pycache__/*" "*.pyc"'
 
-                    def pyExamineResponse = sh(script: """
+                    def pyExamineResponse=sh(script: """
                         curl -X POST "${env.PYEXAMINE_URL}" \
                         -F "file=@source_code.zip" \
                         -H "accept: application/json"
@@ -65,11 +65,11 @@ pipeline {
                     
                     try {
                         // JSON 파싱 확인 (유효한 JSON인지 검증)
-                        def jsonSlurper = new groovy.json.JsonSlurper()
-                        def jsonObj = jsonSlurper.parseText(pyExamineResponse)
+                        def jsonSlurper=new groovy.json.JsonSlurper()
+                        def jsonObj=jsonSlurper.parseText(pyExamineResponse)
                         
                         // 사람이 읽기 좋게 포맷팅 (Pretty Print)
-                        def prettyJson = groovy.json.JsonOutput.prettyPrint(pyExamineResponse)
+                        def prettyJson=groovy.json.JsonOutput.prettyPrint(pyExamineResponse)
                         
                         echo "========================================================"
                         echo "   [DEBUG] DATA TO BE SENT TO BACKEND"
@@ -85,7 +85,7 @@ pipeline {
                         echo "Raw Response: ${pyExamineResponse}"
                     }
 
-                    def backendMetricsUrl = "${env.SWV_BACKEND_URL}/metrics"
+                    def backendMetricsUrl="${env.SWV_BACKEND_URL}/metrics"
                     
                     try {
                         writeFile file: 'pyexamine_result.json', text: pyExamineResponse
@@ -107,7 +107,7 @@ pipeline {
             steps {
                 script {
                     // [핵심 수정] 도구 경로를 명시적으로 변수에 할당
-                    def scannerHome = tool 'SonarScanner-Latest'
+                    def scannerHome=tool 'SonarScanner-Latest'
                     
                     withSonarQubeEnv(env.SONAR_SERVER) {
                         // [핵심 수정] 절대 경로로 실행 (${scannerHome}/bin/sonar-scanner)
@@ -120,7 +120,7 @@ pipeline {
                             -Dsonar.python.version=3.10
                         """
                     }
-                    qualityGateResult = waitForQualityGate abortPipeline: true, credentialsId: env.SONAR_CREDENTIALS
+                    qualityGateResult=waitForQualityGate abortPipeline: true, credentialsId: env.SONAR_CREDENTIALS
                 }
             }   
         }
@@ -128,7 +128,7 @@ pipeline {
         stage('Notify SWV Backend') {
             steps {
                 script {
-                    def payload = [
+                    def payload=[
                         teamName: "IEUM-Backend-Team", 
                         jenkinsJobName: env.JOB_NAME,
                         analysis: [
@@ -139,7 +139,7 @@ pipeline {
                             commitHash: sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
                         ]
                     ]
-                    def payloadJson = groovy.json.JsonOutput.toJson(payload)
+                    def payloadJson=groovy.json.JsonOutput.toJson(payload)
                     
                     try {
                         httpRequest(
