@@ -84,9 +84,7 @@ pipeline {
                         -H "accept: application/json"
                     """, returnStdout: true).trim()
 
-                    // 2. 데이터 병합 (Raw Data + Jenkins Metadata)
-                    def jsonSlurper = new groovy.json.JsonSlurper()
-                    def rawResults = jsonSlurper.parseText(pyExamineResponse)
+                    def rawResults = new groovy.json.JsonSlurperClassic().parseText(pyExamineResponse)
                     
                     // [핵심] 백엔드 DTO(CreateAnalysisDto) 구조에 맞춰 데이터 포장
                     def mergedPayload = [
