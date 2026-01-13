@@ -100,7 +100,7 @@ pipeline {
                             status: "COMPLETED", 
                             buildUrl: env.BUILD_URL,
                             commitHash: sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
-                            pyExamineResults: rawResults
+                            pyExamineResult: rawResults
                         ]
                     ]
 
