@@ -49,60 +49,6 @@ pipeline {
             }
         }
 
-        stage('PyExamine Analysis') {
-            steps {
-                script {
-                    echo ">>> Starting PyExamine Analysis..."
-                    sh 'zip -r source_code.zip . -x "*.git*" "__pycache__/*" "*.pyc"'
-
-                    def pyExamineResponse=sh(script: """
-                        curl -X POST "${env.PYEXAMINE_URL}" \
-                        -F "file=@source_code.zip" \
-                        -H "accept: application/json"
-                    """, returnStdout: true).trim()
-
-                    echo ">>> PyExamine Analysis Completed."
-                    
-                    try {
-                        // JSON 파싱 확인 (유효한 JSON인지 검증)
-                        def jsonSlurper=new groovy.json.JsonSlurper()
-                        def jsonObj=jsonSlurper.parseText(pyExamineResponse)
-                        
-                        // 사람이 읽기 좋게 포맷팅 (Pretty Print)
-                        def prettyJson=groovy.json.JsonOutput.prettyPrint(pyExamineResponse)
-                        
-                        echo "========================================================"
-                        echo "   [DEBUG] DATA TO BE SENT TO BACKEND"
-                        echo "========================================================"
-                        echo "1. Target Endpoint: ${params.SWV_BACKEND_URL}/code-analysis/results" // 엔드포인트 확인
-                        echo "2. Data Count     : ${jsonObj.size()} items"                 // 데이터 개수 확인
-                        echo "3. Data Structure (Sample/Full):"
-                        echo prettyJson                                                  // 실제 데이터 전체 출력
-                        echo "========================================================"
-                        
-                    } catch (Exception e) {
-                        echo "!!! WARNING: Failed to parse/log PyExamine response. Is it valid JSON?"
-                        echo "Raw Response: ${pyExamineResponse}"
-                    }
-
-                    def backendMetricsUrl="${env.SWV_BACKEND_URL}/metrics"
-                    
-                    try {
-                        writeFile file: 'pyexamine_result.json', text: pyExamineResponse
-                        // [알림] 이전 빌드에서 여기서 404가 떴습니다. 백엔드 URL을 확인하세요.
-                        sh """
-                            curl -X POST "${backendMetricsUrl}" \
-                            -H "Content-Type: application/json" \
-                            -d @pyexamine_result.json
-                        """
-                        echo ">>> PyExamine results sent successfully."
-                    } catch (Exception e) {
-                        echo ">>> Failed to send: ${e.getMessage()}"
-                    }
-                }
-            }
-        }
-
         stage('SonarQube Analysis & Quality Gate') {
             steps {
                 script {
@@ -125,6 +71,53 @@ pipeline {
             }   
         }
 
+        stage('PyExamine Analysis') {
+            steps {
+                script {
+                    echo ">>> Starting PyExamine Analysis..."
+                    sh 'zip -r source_code.zip . -x "*.git*" "__pycache__/*" "*.pyc"'
+
+                    // 1. PyExamine Raw 데이터 수신
+                    def pyExamineResponse = sh(script: """
+                        curl -X POST "${env.PYEXAMINE_URL}" \
+                        -F "file=@source_code.zip" \
+                        -H "accept: application/json"
+                    """, returnStdout: true).trim()
+
+                    // 2. 데이터 병합 (Raw Data + Jenkins Metadata)
+                    def jsonSlurper = new groovy.json.JsonSlurper()
+                    def rawResults = jsonSlurper.parseText(pyExamineResponse)
+                    
+                    // [핵심] 백엔드 DTO(CreateAnalysisDto) 구조에 맞춰 데이터 포장
+                    def mergedPayload = [
+                        teamName: "stable-baselines3",        // @IsString() teamName
+                        jenkinsJobName: env.JOB_NAME,         // @IsString() jenkinsJobName
+                        analysis: [
+                            jobName: env.JOB_NAME,            // @IsString() jobName
+                            buildNumber: env.BUILD_NUMBER.toInteger(), // @IsInt() buildNumber (형변환 필수)
+                            status: qualityGateResult.status,              // @IsString() status (PyExamine 단계이므로 임의값 설정)
+                            buildUrl: env.BUILD_URL,          // @IsString() buildUrl
+                            commitHash: sh(returnStdout: true, script: 'git rev-parse HEAD').trim(), // @IsString() commitHash
+                            pyExamineResults: rawResults      
+                        ]
+                    ]
+                    
+                    def finalJson = groovy.json.JsonOutput.toJson(mergedPayload)
+
+                    // 3. 백엔드로 전송 (엔드포인트 수정: code-analysis)
+                    def backendUrl = "${env.SWV_BACKEND_URL}/code-analysis/results"
+                    
+                    writeFile file: 'final_payload.json', text: finalJson
+                    
+                    sh """
+                        curl -X POST "${backendUrl}" \
+                        -H "Content-Type: application/json" \
+                        -d @final_payload.json
+                    """
+                }
+            }
+        }
+
         stage('Notify SWV Backend') {
             steps {
                 script {
@@ -143,7 +136,7 @@ pipeline {
                     
                     try {
                         httpRequest(
-                            url: env.SWV_BACKEND_URL, 
+                            url: env.SWV_BACKEND_URL/'static-analysis', 
                             httpMode: 'POST',
                             contentType: 'APPLICATION_JSON',
                             requestBody: payloadJson,
