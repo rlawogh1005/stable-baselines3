@@ -63,6 +63,28 @@ pipeline {
 
                     echo ">>> PyExamine Analysis Completed."
                     
+                    try {
+                        // JSON 파싱 확인 (유효한 JSON인지 검증)
+                        def jsonSlurper = new groovy.json.JsonSlurper()
+                        def jsonObj = jsonSlurper.parseText(pyExamineResponse)
+                        
+                        // 사람이 읽기 좋게 포맷팅 (Pretty Print)
+                        def prettyJson = groovy.json.JsonOutput.prettyPrint(pyExamineResponse)
+                        
+                        echo "========================================================"
+                        echo "   [DEBUG] DATA TO BE SENT TO BACKEND"
+                        echo "========================================================"
+                        echo "1. Target Endpoint: ${params.SWV_BACKEND_URL}/code-analysis/results" // 엔드포인트 확인
+                        echo "2. Data Count     : ${jsonObj.size()} items"                 // 데이터 개수 확인
+                        echo "3. Data Structure (Sample/Full):"
+                        echo prettyJson                                                  // 실제 데이터 전체 출력
+                        echo "========================================================"
+                        
+                    } catch (Exception e) {
+                        echo "!!! WARNING: Failed to parse/log PyExamine response. Is it valid JSON?"
+                        echo "Raw Response: ${pyExamineResponse}"
+                    }
+
                     def backendMetricsUrl = "${env.SWV_BACKEND_URL}/metrics"
                     
                     try {
@@ -100,7 +122,7 @@ pipeline {
                     }
                     qualityGateResult = waitForQualityGate abortPipeline: true, credentialsId: env.SONAR_CREDENTIALS
                 }
-            }
+            }   
         }
 
         stage('Notify SWV Backend') {
