@@ -39,9 +39,12 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    // [유지] Java 필수 설치
+                    // 1. 패키지 설치 (기존 코드)
                     sh 'apt-get update && apt-get install -y default-jre zip curl'
                     
+                    // [핵심 추가] Git Dubious Ownership 에러 방지 설정
+                    sh 'git config --global --add safe.directory "*"'
+
                     if (fileExists('requirements.txt')) {
                         sh 'pip install -r requirements.txt'
                     }
