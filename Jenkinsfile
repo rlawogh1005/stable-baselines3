@@ -129,6 +129,20 @@ pipeline {
                 }
             }
         }
+
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    // [수정] openjdk-17-jre 대신 default-jre 사용
+                    // default-jre는 해당 리눅스 버전에서 가장 안정적인 Java 버전을 자동으로 설치합니다.
+                    sh 'apt-get update && apt-get install -y default-jre zip curl'
+                    
+                    if (fileExists('requirements.txt')) {
+                        sh 'pip install -r requirements.txt'
+                    }
+                }
+            }
+        }
     }
 
     post {
