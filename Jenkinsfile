@@ -15,7 +15,7 @@ pipeline {
         SONAR_PROJECT_KEY="${env.JOB_NAME}"
         
         // [주의] 백엔드 API 경로 확인 필요 (로그상 404 발생함)
-        SWV_BACKEND_URL='http://mp-backend:3000/api/team-projects'
+        SWV_BACKEND_URL='http://mp-backend:3000/api'
         PYEXAMINE_URL='http://pyexamine-service:8000/analyze'
 
         SONAR_SERVER='SonarQube-Server'
@@ -114,13 +114,13 @@ pipeline {
                     echo "========================================================"
                     echo "   [DEBUG] FINAL PAYLOAD TO BACKEND"
                     echo "========================================================"
-                    echo "1. Target Endpoint: ${env.SWV_BACKEND_URL}/code-analysis/results"
+                    echo "1. Target Endpoint: ${env.SWV_BACKEND_URL}/code-analysis"
                     echo "2. Payload Preview:"
                     echo payloadString
                     echo "========================================================"
 
                     // 6. 백엔드로 전송
-                    def backendUrl = "${env.SWV_BACKEND_URL}/code-analysis/results"
+                    def backendUrl = "${env.SWV_BACKEND_URL}/code-analysis"
                     
                     sh """
                         curl -X POST "${backendUrl}" \
