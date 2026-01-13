@@ -1,31 +1,34 @@
+// [수정] 변수 선언 제거 (environment에서 처리)
 def qualityGateResult
 
-properties([
-    parameters([
-        string(name: 'SONAR_PROJECT_KEY', defaultValue: 'your-python-project-key', description: 'SonarQube Project Key'),
-        string(name: 'SWV_BACKEND_URL', defaultValue: 'http://mp-backend:3000/api/team-projects', description: 'SWV Backend Notification URL'),
-        string(name: 'PYEXAMINE_URL', defaultValue: 'http://pyexamine-service:8000/analyze', description: 'PyExamine Service URL')
-    ])
-])
+// [핵심 수정 1] parameters 블록 전체 삭제 -> 'Build Now' 클릭 시 즉시 실행됨
 
 pipeline {
     agent {
         docker {
             image 'python:3.10'
-            // [권장] 루트 권한으로 실행하여 apt-get 설치 허용
+            // [권장] 루트 권한으로 실행 (패키지 설치 위해)
             args '-u root:root --network=shared-net'
         }
     }
 
     environment {
+        // [핵심 수정 2] 파라미터 대신 고정된 환경 변수 사용
+        // 1. SonarQube 키를 'Jenkins Job 이름'으로 자동 설정
+        SONAR_PROJECT_KEY  = "${env.JOB_NAME}"
+        
+        // 2. URL 설정 고정 (필요시 수정)
+        SWV_BACKEND_URL    = 'http://mp-backend:3000/api/team-projects'
+        PYEXAMINE_URL      = 'http://pyexamine-service:8000/analyze'
+
         SONAR_SERVER       = 'SonarQube-Server'
         SONAR_CREDENTIALS  = 'SONAR_QUBE_TOKEN'
         SWV_CREDENTIALS    = 'SWV_BACKEND_TOKEN_ID'
         PYTHONIOENCODING   = 'utf-8'
     }
     
-    // [수정 1] 도구 이름을 Jenkins 에러 로그에 나온 제안대로 변경
     tools {
+        // [유지] 앞서 확인한 도구 이름
         'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScanner-Latest'
     }
 
@@ -39,8 +42,8 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    // [수정 2] sonar-scanner 실행을 위해 Java(JRE) 필수 설치
-                    sh 'apt-get update && apt-get install -y openjdk-17-jre zip curl'
+                    // [유지] Java 오류 해결을 위한 default-jre 사용
+                    sh 'apt-get update && apt-get install -y default-jre zip curl'
                     
                     if (fileExists('requirements.txt')) {
                         sh 'pip install -r requirements.txt'
@@ -53,17 +56,19 @@ pipeline {
             steps {
                 script {
                     echo ">>> Starting PyExamine Analysis..."
+                    // [유지] 불필요 파일 제외하고 압축
                     sh 'zip -r source_code.zip . -x "*.git*" "__pycache__/*" "*.pyc"'
 
+                    // 환경 변수(PYEXAMINE_URL) 사용
                     def pyExamineResponse = sh(script: """
-                        curl -X POST "${params.PYEXAMINE_URL}" \
+                        curl -X POST "${env.PYEXAMINE_URL}" \
                         -F "file=@source_code.zip" \
                         -H "accept: application/json"
                     """, returnStdout: true).trim()
 
                     echo ">>> PyExamine Analysis Completed."
                     
-                    def backendMetricsUrl = "${params.SWV_BACKEND_URL}/metrics"
+                    def backendMetricsUrl = "${env.SWV_BACKEND_URL}/metrics"
                     
                     try {
                         writeFile file: 'pyexamine_result.json', text: pyExamineResponse
@@ -84,10 +89,10 @@ pipeline {
             steps {
                 script {
                     withSonarQubeEnv(env.SONAR_SERVER) {
-                        // [확인] Tool 설정이 올바르면 'sonar-scanner' 명령어가 PATH에 자동 등록됨
+                        // [핵심 수정 3] params.KEY 대신 env.SONAR_PROJECT_KEY (즉, JOB_NAME) 사용
                         sh """
                             sonar-scanner \
-                            -Dsonar.projectKey=${params.SONAR_PROJECT_KEY} \
+                            -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
                             -Dsonar.sources=. \
                             -Dsonar.token=${SONAR_AUTH_TOKEN} \
                             -Dsonar.language=py \
@@ -117,7 +122,7 @@ pipeline {
                     
                     try {
                         httpRequest(
-                            url: params.SWV_BACKEND_URL,
+                            url: env.SWV_BACKEND_URL, // 환경 변수 사용
                             httpMode: 'POST',
                             contentType: 'APPLICATION_JSON',
                             requestBody: payloadJson,
@@ -125,20 +130,6 @@ pipeline {
                         )
                     } catch (Exception e) {
                         echo ">>> Failed to send Build Status."
-                    }
-                }
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                script {
-                    // [수정] openjdk-17-jre 대신 default-jre 사용
-                    // default-jre는 해당 리눅스 버전에서 가장 안정적인 Java 버전을 자동으로 설치합니다.
-                    sh 'apt-get update && apt-get install -y default-jre zip curl'
-                    
-                    if (fileExists('requirements.txt')) {
-                        sh 'pip install -r requirements.txt'
                     }
                 }
             }
