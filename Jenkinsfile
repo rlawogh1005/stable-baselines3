@@ -84,7 +84,7 @@ pipeline {
                         -H "accept: application/json"
                     """, returnStdout: true).trim()
 
-                    def rawResults = new groovy.json.JsonSlurperClassic().parseText(pyExamineResponse)
+                    def rawResults = readJSON text: pyExamineResponse
                     
                     // [핵심] 백엔드 DTO(CreateAnalysisDto) 구조에 맞춰 데이터 포장
                     def mergedPayload = [
