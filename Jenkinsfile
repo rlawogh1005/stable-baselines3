@@ -1,23 +1,20 @@
-// [수정] 변수 선언 제거 (environment에서 처리)
+// [변수 선언]
 def qualityGateResult
-
-// [핵심 수정 1] parameters 블록 전체 삭제 -> 'Build Now' 클릭 시 즉시 실행됨
 
 pipeline {
     agent {
         docker {
             image 'python:3.10'
-            // [권장] 루트 권한으로 실행 (패키지 설치 위해)
+            // [유지] 루트 권한 및 네트워크 설정
             args '-u root:root --network=shared-net'
         }
     }
 
     environment {
-        // [핵심 수정 2] 파라미터 대신 고정된 환경 변수 사용
-        // 1. SonarQube 키를 'Jenkins Job 이름'으로 자동 설정
+        // [자동 설정] SonarQube 키를 Jenkins Job 이름으로 설정
         SONAR_PROJECT_KEY  = "${env.JOB_NAME}"
         
-        // 2. URL 설정 고정 (필요시 수정)
+        // [주의] 백엔드 API 경로 확인 필요 (로그상 404 발생함)
         SWV_BACKEND_URL    = 'http://mp-backend:3000/api/team-projects'
         PYEXAMINE_URL      = 'http://pyexamine-service:8000/analyze'
 
@@ -27,8 +24,8 @@ pipeline {
         PYTHONIOENCODING   = 'utf-8'
     }
     
+    // [참고] tools 블록은 유지하되, 실제 실행은 경로를 받아와서 수행함
     tools {
-        // [유지] 앞서 확인한 도구 이름
         'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScanner-Latest'
     }
 
@@ -42,7 +39,7 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    // [유지] Java 오류 해결을 위한 default-jre 사용
+                    // [유지] Java 필수 설치
                     sh 'apt-get update && apt-get install -y default-jre zip curl'
                     
                     if (fileExists('requirements.txt')) {
@@ -56,10 +53,8 @@ pipeline {
             steps {
                 script {
                     echo ">>> Starting PyExamine Analysis..."
-                    // [유지] 불필요 파일 제외하고 압축
                     sh 'zip -r source_code.zip . -x "*.git*" "__pycache__/*" "*.pyc"'
 
-                    // 환경 변수(PYEXAMINE_URL) 사용
                     def pyExamineResponse = sh(script: """
                         curl -X POST "${env.PYEXAMINE_URL}" \
                         -F "file=@source_code.zip" \
@@ -72,6 +67,7 @@ pipeline {
                     
                     try {
                         writeFile file: 'pyexamine_result.json', text: pyExamineResponse
+                        // [알림] 이전 빌드에서 여기서 404가 떴습니다. 백엔드 URL을 확인하세요.
                         sh """
                             curl -X POST "${backendMetricsUrl}" \
                             -H "Content-Type: application/json" \
@@ -88,10 +84,13 @@ pipeline {
         stage('SonarQube Analysis & Quality Gate') {
             steps {
                 script {
+                    // [핵심 수정] 도구 경로를 명시적으로 변수에 할당
+                    def scannerHome = tool 'SonarScanner-Latest'
+                    
                     withSonarQubeEnv(env.SONAR_SERVER) {
-                        // [핵심 수정 3] params.KEY 대신 env.SONAR_PROJECT_KEY (즉, JOB_NAME) 사용
+                        // [핵심 수정] 절대 경로로 실행 (${scannerHome}/bin/sonar-scanner)
                         sh """
-                            sonar-scanner \
+                            "${scannerHome}/bin/sonar-scanner" \
                             -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
                             -Dsonar.sources=. \
                             -Dsonar.token=${SONAR_AUTH_TOKEN} \
@@ -122,7 +121,7 @@ pipeline {
                     
                     try {
                         httpRequest(
-                            url: env.SWV_BACKEND_URL, // 환경 변수 사용
+                            url: env.SWV_BACKEND_URL, 
                             httpMode: 'POST',
                             contentType: 'APPLICATION_JSON',
                             requestBody: payloadJson,
