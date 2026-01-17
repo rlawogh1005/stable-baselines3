@@ -5,18 +5,17 @@ pipeline {
     agent {
         docker {
             image 'python:3.10'
-            // [유지] 루트 권한 및 네트워크 설정
             args '-u root:root --network=shared-net'
         }
     }
 
     environment {
-        // [자동 설정] SonarQube 키를 Jenkins Job 이름으로 설정
         SONAR_PROJECT_KEY="${env.JOB_NAME}"
-        
-        // [주의] 백엔드 API 경로 확인 필요 (로그상 404 발생함)
         SWV_BACKEND_URL='http://mp-backend:3000/api'
         PYEXAMINE_URL='http://pyexamine-service:8000/analyze'
+        
+        // [신규 추가] Parser 컨테이너 엔드포인트
+        PARSER_URL='http://mp-parser:3001/analyze'
 
         SONAR_SERVER='SonarQube-Server'
         SONAR_CREDENTIALS='SONAR_QUBE_TOKEN'
@@ -24,7 +23,6 @@ pipeline {
         PYTHONIOENCODING='utf-8'
     }
     
-    // [참고] tools 블록은 유지하되, 실제 실행은 경로를 받아와서 수행함
     tools {
         'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScanner-Latest'
     }
@@ -36,13 +34,29 @@ pipeline {
             }
         }
 
+        // [신규 추가] Tree-sitter 기반 4계층 구조 분석 및 DB 저장 스테이지
+        stage('Code Structure Analysis (Tree-sitter)') {
+            steps {
+                script {
+                    echo ">>> Triggering Tree-sitter Parser for Structure Analysis..."
+                    
+                    // Parser 컨테이너에게 현재 마운트된 소스 경로(/code) 분석 요청
+                    // Parser는 분석 후 스스로 mp-backend에 결과를 전송함
+                    def parserResponse = sh(script: """
+                        curl -X POST "${env.PARSER_URL}" \
+                        -H "Content-Type: application/json" \
+                        -d '{"path": "/code"}'
+                    """, returnStdout: true).trim()
+                    
+                    echo "Parser Response: ${parserResponse}"
+                }
+            }
+        }
+
         stage('Install Dependencies') {
             steps {
                 script {
-                    // 1. 패키지 설치 (기존 코드)
                     sh 'apt-get update && apt-get install -y default-jre zip curl'
-                    
-                    // [핵심 추가] Git Dubious Ownership 에러 방지 설정
                     sh 'git config --global --add safe.directory "*"'
 
                     if (fileExists('requirements.txt')) {
@@ -55,11 +69,9 @@ pipeline {
         stage('SonarQube Analysis & Quality Gate') {
             steps {
                 script {
-                    // [핵심 수정] 도구 경로를 명시적으로 변수에 할당
                     def scannerHome=tool 'SonarScanner-Latest'
                     
                     withSonarQubeEnv(env.SONAR_SERVER) {
-                        // [핵심 수정] 절대 경로로 실행 (${scannerHome}/bin/sonar-scanner)
                         sh """
                             "${scannerHome}/bin/sonar-scanner" \
                             -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
@@ -80,17 +92,14 @@ pipeline {
                     echo ">>> Starting PyExamine Analysis..."
                     sh 'zip -r source_code.zip . -x "*.git*" "__pycache__/*" "*.pyc"'
 
-                    // 1. PyExamine Raw 데이터 수신
                     def pyExamineResponse = sh(script: """
                         curl -X POST "${env.PYEXAMINE_URL}" \
                         -F "file=@source_code.zip" \
                         -H "accept: application/json"
                     """, returnStdout: true).trim()
 
-                    // 2. 데이터 파싱 (readJSON 사용 - 안전함)
                     def rawResults = readJSON text: pyExamineResponse
                     
-                    // 3. Payload 구성
                     def mergedPayload = [
                         teamName: "stable-baselines3", 
                         jenkinsJobName: env.JOB_NAME,
@@ -104,22 +113,9 @@ pipeline {
                         ]
                     ]
 
-                    // [핵심 수정] 4. 파일 저장 및 JSON 생성 (writeJSON 사용)
-                    // groovy.json.JsonOutput 대신 writeJSON 단계를 사용하여 StackOverflow 방지
                     writeJSON file: 'final_payload.json', json: mergedPayload, pretty: 4
-                    
-                    // 5. 로깅을 위해 파일 내용을 다시 읽음 (직렬화 부하 없음)
                     def payloadString = readFile 'final_payload.json'
                     
-                    echo "========================================================"
-                    echo "   [DEBUG] FINAL PAYLOAD TO BACKEND"
-                    echo "========================================================"
-                    echo "1. Target Endpoint: ${env.SWV_BACKEND_URL}/team-projects"
-                    echo "2. Payload Preview:"
-                    echo payloadString
-                    echo "========================================================"
-
-                    // 6. 백엔드로 전송
                     def backendUrl = "${env.SWV_BACKEND_URL}/team-projects"
                     
                     sh """
@@ -149,7 +145,7 @@ pipeline {
                     
                     try {
                         httpRequest(
-                            url: env.SWV_BACKEND_URL/'static-analysis', 
+                            url: "${env.SWV_BACKEND_URL}/static-analysis", 
                             httpMode: 'POST',
                             contentType: 'APPLICATION_JSON',
                             requestBody: payloadJson,
