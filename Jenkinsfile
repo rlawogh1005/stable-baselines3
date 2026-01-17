@@ -131,7 +131,7 @@ pipeline {
             steps {
                 script {
                     def payload=[
-                        teamName: "IEUM-Backend-Team", 
+                        teamName: "stable-baselines3", 
                         jenkinsJobName: env.JOB_NAME,
                         analysis: [
                             jobName: env.JOB_NAME,
@@ -145,7 +145,7 @@ pipeline {
                     
                     try {
                         httpRequest(
-                            url: "${env.SWV_BACKEND_URL}/static-analysis", 
+                            url: "${env.SWV_BACKEND_URL}/team-projects", 
                             httpMode: 'POST',
                             contentType: 'APPLICATION_JSON',
                             requestBody: payloadJson,
