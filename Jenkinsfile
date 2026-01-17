@@ -35,20 +35,18 @@ pipeline {
         }
 
         // [신규 추가] Tree-sitter 기반 4계층 구조 분석 및 DB 저장 스테이지
-        stage('Code Structure Analysis (Tree-sitter)') {
+        stage('Code Structure Analysis') {
             steps {
                 script {
-                    echo ">>> Triggering Tree-sitter Parser for Structure Analysis..."
-                    
-                    // Parser 컨테이너에게 현재 마운트된 소스 경로(/code) 분석 요청
-                    // Parser는 분석 후 스스로 mp-backend에 결과를 전송함
-                    def parserResponse = sh(script: """
-                        curl -X POST "${env.PARSER_URL}" \
+                    // env.JOB_NAME은 Jenkins가 자동으로 제공하는 변수입니다.
+                    sh """
+                        curl -X POST "http://mp-parser:3001/analyze" \
                         -H "Content-Type: application/json" \
-                        -d '{"path": "/code"}'
-                    """, returnStdout: true).trim()
-                    
-                    echo "Parser Response: ${parserResponse}"
+                        -d '{
+                            "path": "/code",
+                            "jenkinsJobName": "${env.JOB_NAME}"
+                        }'
+                    """
                 }
             }
         }
