@@ -1,4 +1,3 @@
-// [변수 선언]
 def qualityGateResult
 
 pipeline {
@@ -12,15 +11,11 @@ pipeline {
     environment {
         SWV_BACKEND_URL='http://mp-backend:3000/api'
         PYEXAMINE_URL='http://pyexamine-service:8000/analyze'
-        SONAR_PROJECT_KEY='stable-baselines3'
-        // [신규 추가] Parser 컨테이너 엔드포인트
         PARSER_URL='http://mp-parser:3001/analyze'
-
+        SONAR_PROJECT_KEY='stable-baselines3'
         SONAR_SERVER='SonarQube-Server'
         SONAR_CREDENTIALS='SONAR_QUBE_TOKEN'
-        SWV_CREDENTIALS='SWV_BACKEND_TOKEN_ID'
         PYTHONIOENCODING='utf-8'
-        
     }
     
     tools {
@@ -28,97 +23,70 @@ pipeline {
     }
 
     stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
-        // [신규 추가] Tree-sitter 기반 4계층 구조 분석 및 DB 저장 스테이지
-        stage('Environment Setup & Analysis') { // 순서를 맨 앞으로 조정
+        stage('Initialize & Analysis') {
             steps {
                 script {
-                    // 1. 도구 설치 확인 (이미지에 zip/curl이 없을 경우 대비)
-                    sh 'apt-get update && apt-get install -y zip curl'
+                    checkout scm
+                    // 1. 필수 도구 통합 설치
+                    sh 'apt-get update && apt-get install -y zip curl default-jre'
+                    sh 'git config --global --add safe.directory "*"'
 
-                    // 2. 파일 압축
+                    // 2. 소스 코드 압축 (공용)
                     echo ">>> Zipping Source Code..."
-                    sh 'zip -r code_to_analyze.zip . -x "*.git*" "node_modules/*" "dist/*"'
+                    sh 'zip -r code_package.zip . -x "*.git*" "node_modules/*" "dist/*" "__pycache__/*"'
 
-                    // 3. 파일 생성 여부 즉시 확인 (검증 단계)
-                    if (!fileExists('code_to_analyze.zip')) {
-                        error "파일 생성 실패: code_to_analyze.zip이 존재하지 않습니다."
-                    }
-
-                    // 4. Parser로 전송
+                    // 3. AST 구조 분석 수행
                     echo ">>> Sending to Parser Container..."
-                    try {
-                        // -v 옵션을 추가하여 상세한 통신 로그 확인
-                        def parserResponse = sh(
-                            script: """
-                                curl -v -s -X POST "http://mp-parser:3001/analyze" \
-                                -F "file=@code_to_analyze.zip"
-                            """, 
-                            returnStdout: true
-                        ).trim()
-                        
-                        writeFile file: 'ast_result.json', text: parserResponse
-                        echo ">>> AST Data saved to ast_result.json (File size: ${parserResponse.length()} bytes)"
-                    } catch (Exception e) {
-                        echo ">>> [Critical] Parser Communication Error: ${e.message}"
-                        // 파일이 있는데도 에러가 난다면 네트워크 문제임
+                    def parserResponse = sh(
+                        script: "curl -s -X POST '${env.PARSER_URL}' -F 'file=@code_package.zip'", 
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (!parserResponse || parserResponse.contains("error")) {
+                        error "Parser Error: ${parserResponse}"
                     }
+                    writeFile file: 'ast_result.json', text: parserResponse
                 }
             }
         }
 
-        stage('Install Dependencies') {
+        stage('SonarQube & Quality Gate') {
             steps {
                 script {
                     sh 'apt-get update && apt-get install -y default-jre zip curl'
                     sh 'git config --global --add safe.directory "*"'
-
                     if (fileExists('requirements.txt')) {
                         sh 'pip install -r requirements.txt'
                     }
-                }
-            }
-        }
-
-        stage('SonarQube Analysis & Quality Gate') {
-            steps {
-                script {
-                    def scannerHome=tool 'SonarScanner-Latest'
                     
+                    def scannerHome = tool 'SonarScanner-Latest'
                     withSonarQubeEnv(env.SONAR_SERVER) {
                         sh """
                             "${scannerHome}/bin/sonar-scanner" \
                             -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
                             -Dsonar.sources=. \
-                            -Dsonar.token=${SONAR_AUTH_TOKEN} \
                             -Dsonar.language=py \
                             -Dsonar.python.version=3.10
                         """
                     }
-                    qualityGateResult=waitForQualityGate abortPipeline: true, credentialsId: env.SONAR_CREDENTIALS
+                    qualityGateResult = waitForQualityGate abortPipeline: true, credentialsId: env.SONAR_CREDENTIALS
                 }
             }   
         }
 
-        stage('PyExamine Analysis & Final Report') {
+        stage('PyExamine & Integrated Report') {
             steps {
                 script {
                     echo ">>> Starting PyExamine Analysis..."
-                    sh 'zip -r source_code.zip . -x "*.git*" "__pycache__/*" "*.pyc"'
+                    def pyExamineResponse = sh(
+                        script: "curl -s -X POST '${env.PYEXAMINE_URL}' -F 'file=@code_package.zip'", 
+                        returnStdout: true
+                    ).trim()
 
-                    def pyExamineResponse = sh(script: """
-                        curl -X POST "${env.PYEXAMINE_URL}" \
-                        -F "file=@source_code.zip" \
-                        -H "accept: application/json"
-                    """, returnStdout: true).trim()
-
-                    def rawResults = readJSON text: pyExamineResponse
+                    def rawSmellResults = readJSON text: pyExamineResponse
+                    def rawAstResults = readJSON file: 'ast_result.json'
                     
+                    // [핵심] 모든 데이터를 하나로 결합
                     def mergedPayload = [
                         teamName: "stable-baselines3", 
                         jenkinsJobName: env.JOB_NAME,
@@ -126,33 +94,31 @@ pipeline {
                         analysis: [
                             jobName: env.JOB_NAME,
                             buildNumber: env.BUILD_NUMBER.toInteger(),
-                            status: "COMPLETED", 
+                            status: qualityGateResult.status, // SonarQube 결과 반영
                             buildUrl: env.BUILD_URL,
                             commitHash: sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
-                            pyExamineResult: rawResults
+                            pyExamineResult: rawSmellResults,
+                            astResults: rawAstResults.nodes // AST 데이터 포함
                         ]
                     ]
 
-                    writeJSON file: 'final_payload.json', json: mergedPayload, pretty: 4
-                    def payloadString = readFile 'final_payload.json'
+                    writeJSON file: 'final_payload.json', json: mergedPayload
                     
-                    def backendUrl = "${env.SWV_BACKEND_URL}/team-projects"
-                    
+                    echo ">>> Sending Integrated Payload to Backend..."
                     sh """
-                        curl -X POST "${backendUrl}" \
+                        curl -X POST "${env.SWV_BACKEND_URL}/team-projects" \
                         -H "Content-Type: application/json" \
                         -d @final_payload.json
                     """
                 }
             }
         }
-
-
     }
 
     post {
         always {
-            sh 'rm -f source_code.zip pyexamine_result.json'
+            // 모든 임시 파일 삭제
+            sh 'rm -f *.zip *.json'
             cleanWs()
         }
     }
