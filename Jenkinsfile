@@ -38,15 +38,39 @@ pipeline {
         stage('Code Structure Analysis') {
             steps {
                 script {
-                    // env.JOB_NAME은 Jenkins가 자동으로 제공하는 변수입니다.
-                    sh """
-                        curl -X POST "http://mp-parser:3001/analyze" \
-                        -H "Content-Type: application/json" \
-                        -d '{
-                            "path": "/code",
-                            "jenkinsJobName": "${env.JOB_NAME}"
-                        }'
-                    """
+                    echo ">>> [Step 1] Requesting AST Analysis to Parser Container..."
+                    
+                    try {
+                        // curl 결과를 변수에 저장. -s(silent) 옵션으로 진행바 제거
+                        def parserResponse = sh(
+                            script: """
+                                curl -s -X POST "${env.PARSER_URL}" \
+                                -H "Content-Type: application/json" \
+                                -d '{
+                                    "path": "/code",
+                                    "jenkinsJobName": "${env.JOB_NAME}"
+                                }'
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        // 수신된 결과 로깅
+                        if (parserResponse) {
+                            echo ">>> [Success] Parser Response Received:"
+                            echo "${parserResponse}"
+                            
+                            // (선택 사항) JSON 형식이 맞는지 검증하기 위해 읽어봄
+                            // def testJson = readJSON text: parserResponse
+                            // echo "Parsed AST Node Count: ${testJson.nodes?.size() ?: 'N/A'}"
+                        } else {
+                            error "Parser returned empty response."
+                        }
+                    } catch (Exception e) {
+                        echo ">>> [Failure] Failed to receive results from Parser."
+                        echo "Error: ${e.message}"
+                        // 전체 파이프라인을 중단시키려면 error 호출, 아니면 그냥 진행
+                        // error "AST Analysis Failed"
+                    }
                 }
             }
         }
