@@ -47,8 +47,7 @@ pipeline {
                                 curl -s -X POST "${env.PARSER_URL}" \
                                 -H "Content-Type: application/json" \
                                 -d '{
-                                    "path": "/code",
-                                    "jenkinsJobName": "${env.JOB_NAME}"
+                                    "path": "/code"
                                 }'
                             """,
                             returnStdout: true
