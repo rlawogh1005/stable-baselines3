@@ -27,25 +27,28 @@ pipeline {
             steps {
                 script {
                     checkout scm
-                    // 1. 필수 도구 통합 설치
                     sh 'apt-get update && apt-get install -y zip curl default-jre'
                     sh 'git config --global --add safe.directory "*"'
 
-                    // 2. 소스 코드 압축 (공용)
                     echo ">>> Zipping Source Code..."
                     sh 'zip -r code_package.zip . -x "*.git*" "node_modules/*" "dist/*" "__pycache__/*"'
 
-                    // 3. AST 구조 분석 수행
                     echo ">>> Sending to Parser Container..."
                     def parserResponse = sh(
                         script: "curl -s -X POST '${env.PARSER_URL}' -F 'file=@code_package.zip'", 
                         returnStdout: true
                     ).trim()
                     
-                    if (!parserResponse || parserResponse.contains("error")) {
-                        error "Parser Error: ${parserResponse}"
+                    // [최적화] 단순 문자열 contains("error") 제거
+                    // JSON으로 파싱하여 실제 데이터 구조를 검증
+                    def parserJson = readJSON text: parserResponse
+                    
+                    if (!parserJson.nodes) {
+                        error "Parser Error: No nodes found in response. Raw: ${parserResponse}"
                     }
+
                     writeFile file: 'ast_result.json', text: parserResponse
+                    echo ">>> AST Data verified and saved. (Nodes: ${parserJson.nodes.size()})"
                 }
             }
         }
