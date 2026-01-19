@@ -35,37 +35,38 @@ pipeline {
         }
 
         // [신규 추가] Tree-sitter 기반 4계층 구조 분석 및 DB 저장 스테이지
-        stage('Code Structure Analysis') {
+        stage('Environment Setup & Analysis') { // 순서를 맨 앞으로 조정
             steps {
                 script {
-                    echo ">>> [Step 1] Requesting AST Analysis to Parser Container..."
-                    
+                    // 1. 도구 설치 확인 (이미지에 zip/curl이 없을 경우 대비)
+                    sh 'apt-get update && apt-get install -y zip curl'
+
+                    // 2. 파일 압축
+                    echo ">>> Zipping Source Code..."
+                    sh 'zip -r code_to_analyze.zip . -x "*.git*" "node_modules/*" "dist/*"'
+
+                    // 3. 파일 생성 여부 즉시 확인 (검증 단계)
+                    if (!fileExists('code_to_analyze.zip')) {
+                        error "파일 생성 실패: code_to_analyze.zip이 존재하지 않습니다."
+                    }
+
+                    // 4. Parser로 전송
+                    echo ">>> Sending to Parser Container..."
                     try {
-                        // curl 결과를 변수에 저장. -s(silent) 옵션으로 진행바 제거
+                        // -v 옵션을 추가하여 상세한 통신 로그 확인
                         def parserResponse = sh(
                             script: """
-                                curl -s -X POST "${env.PARSER_URL}" \
+                                curl -v -s -X POST "http://mp-parser:3001/analyze" \
                                 -F "file=@code_to_analyze.zip"
-                            """,
+                            """, 
                             returnStdout: true
                         ).trim()
-
-                        // 수신된 결과 로깅
-                        if (parserResponse) {
-                            echo ">>> [Success] Parser Response Received:"
-                            echo "${parserResponse}"
-                            
-                            // (선택 사항) JSON 형식이 맞는지 검증하기 위해 읽어봄
-                            // def testJson = readJSON text: parserResponse
-                            // echo "Parsed AST Node Count: ${testJson.nodes?.size() ?: 'N/A'}"
-                        } else {
-                            error "Parser returned empty response."
-                        }
+                        
+                        echo ">>> Parser Response: ${parserResponse}"
+                        env.RAW_AST_DATA = parserResponse
                     } catch (Exception e) {
-                        echo ">>> [Failure] Failed to receive results from Parser."
-                        echo "Error: ${e.message}"
-                        // 전체 파이프라인을 중단시키려면 error 호출, 아니면 그냥 진행
-                        // error "AST Analysis Failed"
+                        echo ">>> [Critical] Parser Communication Error: ${e.message}"
+                        // 파일이 있는데도 에러가 난다면 네트워크 문제임
                     }
                 }
             }
