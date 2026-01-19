@@ -103,7 +103,7 @@ pipeline {
                             pyExamineResult: rawSmellResults,
                             astResults: rawAstResults.nodes // AST 데이터 포함
                         ],
-                        astResult: rawAstResults
+                        astData: rawAstResults
                     ]
                     echo ">>> Merged Payload: ${mergedPayload}"
                     writeJSON file: 'final_payload.json', json: mergedPayload
