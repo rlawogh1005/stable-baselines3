@@ -10,10 +10,9 @@ pipeline {
     }
 
     environment {
-        SONAR_PROJECT_KEY="${env.JOB_NAME}"
         SWV_BACKEND_URL='http://mp-backend:3000/api'
         PYEXAMINE_URL='http://pyexamine-service:8000/analyze'
-        
+        SONAR_PROJECT_KEY='stable-baselines3'
         // [신규 추가] Parser 컨테이너 엔드포인트
         PARSER_URL='http://mp-parser:3001/analyze'
 
@@ -21,6 +20,7 @@ pipeline {
         SONAR_CREDENTIALS='SONAR_QUBE_TOKEN'
         SWV_CREDENTIALS='SWV_BACKEND_TOKEN_ID'
         PYTHONIOENCODING='utf-8'
+        
     }
     
     tools {
@@ -101,6 +101,7 @@ pipeline {
                     def mergedPayload = [
                         teamName: "stable-baselines3", 
                         jenkinsJobName: env.JOB_NAME,
+                        sonarProjectKey: env.SONAR_PROJECT_KEY,
                         analysis: [
                             jobName: env.JOB_NAME,
                             buildNumber: env.BUILD_NUMBER.toInteger(),
