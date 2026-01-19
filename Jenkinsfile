@@ -105,7 +105,7 @@ pipeline {
             }   
         }
 
-        stage('PyExamine Analysis') {
+        stage('PyExamine Analysis & Final Report') {
             steps {
                 script {
                     echo ">>> Starting PyExamine Analysis..."
@@ -147,36 +147,7 @@ pipeline {
             }
         }
 
-        stage('Notify SWV Backend') {
-            steps {
-                script {
-                    def payload=[
-                        teamName: "stable-baselines3", 
-                        jenkinsJobName: env.JOB_NAME,
-                        analysis: [
-                            jobName: env.JOB_NAME,
-                            buildNumber: env.BUILD_NUMBER.toInteger(),
-                            status: qualityGateResult.status,
-                            buildUrl: env.BUILD_URL,
-                            commitHash: sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
-                        ]
-                    ]
-                    def payloadJson=groovy.json.JsonOutput.toJson(payload)
-                    
-                    try {
-                        httpRequest(
-                            url: "${env.SWV_BACKEND_URL}/team-projects", 
-                            httpMode: 'POST',
-                            contentType: 'APPLICATION_JSON',
-                            requestBody: payloadJson,
-                            quiet: false
-                        )
-                    } catch (Exception e) {
-                        echo ">>> Failed to send Build Status."
-                    }
-                }
-            }
-        }
+
     }
 
     post {
