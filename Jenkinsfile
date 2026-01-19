@@ -102,9 +102,10 @@ pipeline {
                             commitHash: sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
                             pyExamineResult: rawSmellResults,
                             astResults: rawAstResults.nodes // AST 데이터 포함
-                        ]
+                        ],
+                        astResult: rawAstResults
                     ]
-
+                    echo ">>> Merged Payload: ${mergedPayload}"
                     writeJSON file: 'final_payload.json', json: mergedPayload
                     
                     echo ">>> Sending Integrated Payload to Backend..."
