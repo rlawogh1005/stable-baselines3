@@ -45,10 +45,7 @@ pipeline {
                         def parserResponse = sh(
                             script: """
                                 curl -s -X POST "${env.PARSER_URL}" \
-                                -H "Content-Type: application/json" \
-                                -d '{
-                                    "path": "/code"
-                                }'
+                                -F "file=@code_to_analyze.zip"
                             """,
                             returnStdout: true
                         ).trim()
