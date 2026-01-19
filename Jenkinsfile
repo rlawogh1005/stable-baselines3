@@ -62,8 +62,8 @@ pipeline {
                             returnStdout: true
                         ).trim()
                         
-                        echo ">>> Parser Response: ${parserResponse}"
-                        env.RAW_AST_DATA = parserResponse
+                        writeFile file: 'ast_result.json', text: parserResponse
+                        echo ">>> AST Data saved to ast_result.json (File size: ${parserResponse.length()} bytes)"
                     } catch (Exception e) {
                         echo ">>> [Critical] Parser Communication Error: ${e.message}"
                         // 파일이 있는데도 에러가 난다면 네트워크 문제임
