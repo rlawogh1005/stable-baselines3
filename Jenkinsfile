@@ -9,7 +9,7 @@ pipeline {
     }
 
     environment {
-        SWV_BACKEND_URL='http://mp-backend:13000/api'
+        SWV_BACKEND_URL='http://codevi-backend:13000/api'
         PYEXAMINE_URL='http://pyexamine-service:8000/analyze'
         PARSER_URL='http://mp-parser:3001/analyze'
         SONAR_PROJECT_KEY='stable-baselines3'
