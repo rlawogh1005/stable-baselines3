@@ -34,22 +34,33 @@ pipeline {
                     echo ">>> Zipping Source Code..."
                     sh 'zip -r code_package.zip . -x "*.git*" "node_modules/*" "dist/*" "__pycache__/*"'
 
-                    echo ">>> Sending to Parser Container..."
-                    def parserResponse = sh(
-                        script: "curl -s -X POST '${env.PARSER_URL}' -F 'file=@code_package.zip'", 
+                    // ── Tree-sitter 파서 호출
+                    echo ">>> Sending to Tree-sitter Parser..."
+                    def treesitterResponse = sh(
+                        script: "curl -s -X POST '${env.TREESITTER_PARSER_URL}' -F 'file=@code_package.zip'",
                         returnStdout: true
                     ).trim()
-                    
-                    // [최적화] 단순 문자열 contains("error") 제거
-                    // JSON으로 파싱하여 실제 데이터 구조를 검증
-                    def parserJson = readJSON text: parserResponse
-                    
-                    if (!parserJson.nodes) {
-                        error "Parser Error: No nodes found in response. Raw: ${parserResponse}"
+
+                    def treesitterJson = readJSON text: treesitterResponse
+                    if (!treesitterJson.nodes) {
+                        error "TreeSitter Parser Error: No nodes found."
                     }
 
-                    writeFile file: 'ast_result.json', text: parserResponse
-                    echo ">>> AST Data verified and saved. (Nodes: ${parserJson.nodes.size()})"
+                    writeFile file: 'ast_treesitter.json', text: treesitterResponse
+                    echo ">>> TreeSitter AST saved. (Nodes: ${treesitterJson.nodes.size()}, Benchmark: ${treesitterJson.benchmark})"
+                    
+                    // ── Raw(Native) 파서 호출
+                    echo ">>> Sending to Raw Parser..."
+                    def rawParserResponse = sh(
+                        script: "curl -s -X POST '${env.RAW_PARSER_URL}' -F 'file=@code_package.zip'",
+                        returnStdout: true
+                    ).trim()
+                    def rawParserJson = readJSON text: rawParserResponse
+                    if (!rawParserJson.nodes) {
+                        error "Raw Parser Error: No nodes found."
+                    }
+                    writeFile file: 'ast_raw.json', text: rawParserResponse
+                    echo ">>> Raw AST saved. (Nodes: ${rawParserJson.nodes.size()}, Benchmark: ${rawParserJson.benchmark})"
                 }
             }
         }
@@ -88,7 +99,8 @@ pipeline {
                     ).trim()
 
                     def rawSmellResults = readJSON text: pyExamineResponse
-                    def rawAstResults = readJSON file: 'ast_result.json'
+                    def treesitterAst = readJSON file: 'ast_treesitter.json'
+                    def rawAst = readJSON file: 'ast_raw.json'
                     
                     // [핵심] 모든 데이터를 하나로 결합
                     def mergedPayload = [
@@ -102,9 +114,12 @@ pipeline {
                             buildUrl: env.BUILD_URL,
                             commitHash: sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
                             pyExamineResult: rawSmellResults,
-                            astResults: rawAstResults.nodes // AST 데이터 포함
+                            astResults: treesitterAst.nodes // AST 데이터 포함
                         ],
-                        astData: rawAstResults
+                        astData: [
+                            treesitter: treesitterAst,
+                            raw: rawAst
+                        ]
                     ]
                     echo ">>> Merged Payload: ${mergedPayload}"
                     writeJSON file: 'final_payload.json', json: mergedPayload
