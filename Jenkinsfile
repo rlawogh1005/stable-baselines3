@@ -11,7 +11,8 @@ pipeline {
     environment {
         SWV_BACKEND_URL='http://codevi-backend:13000/api'
         PYEXAMINE_URL='http://pyexamine-service:8000/analyze'
-        PARSER_URL='http://mp-parser:3001/analyze'
+        TREESITTER_PARSER_URL='http:/codevi-parser-treesitter:3001/analyze'
+        RAW_PARSER_URL='http://codevi-parser-raw:3002/analyze'
         SONAR_PROJECT_KEY='stable-baselines3'
         SONAR_SERVER='SonarQube-Server'
         SONAR_CREDENTIALS='SONAR_QUBE_TOKEN'
