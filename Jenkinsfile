@@ -10,9 +10,10 @@ pipeline {
 
     environment {
         SWV_BACKEND_URL='http://codevi-backend:13000/api'
+        RELATIONAL_BACKEND_URL='http://codevi-backend-relational:13001/api'
+        JSON_BACKEND_URL='http://codevi-backend-json:13002/api'
         PYEXAMINE_URL='http://pyexamine-service:8000/analyze'
-        TREESITTER_PARSER_URL='http:/codevi-parser-treesitter:3001/analyze'
-        RAW_PARSER_URL='http://codevi-parser-raw:3002/analyze'
+        TREESITTER_PARSER_URL='http://codevi-parser-treesitter:3001/analyze'
         SONAR_PROJECT_KEY='stable-baselines3'
         SONAR_SERVER='SonarQube-Server'
         SONAR_CREDENTIALS='SONAR_QUBE_TOKEN'
@@ -24,7 +25,10 @@ pipeline {
     }
 
     stages {
-        stage('Initialize & Analysis') {
+        // ================================================================
+        // Stage 1: 소스코드 zip + Tree-sitter 파서 호출
+        // ================================================================
+        stage('Initialize & Parse') {
             steps {
                 script {
                     checkout scm
@@ -34,7 +38,7 @@ pipeline {
                     echo ">>> Zipping Source Code..."
                     sh 'zip -r code_package.zip . -x "*.git*" "node_modules/*" "dist/*" "__pycache__/*"'
 
-                    // ── Tree-sitter 파서 호출
+                    // ── Tree-sitter 파서 호출 (유일한 파서)
                     echo ">>> Sending to Tree-sitter Parser..."
                     def treesitterResponse = sh(
                         script: "curl -s -X POST '${env.TREESITTER_PARSER_URL}' -F 'file=@code_package.zip'",
@@ -48,23 +52,84 @@ pipeline {
 
                     writeFile file: 'ast_treesitter.json', text: treesitterResponse
                     echo ">>> TreeSitter AST saved. (Nodes: ${treesitterJson.nodes.size()}, Benchmark: ${treesitterJson.benchmark})"
-                    
-                    // ── Raw(Native) 파서 호출
-                    echo ">>> Sending to Raw Parser..."
-                    def rawParserResponse = sh(
-                        script: "curl -s -X POST '${env.RAW_PARSER_URL}' -F 'file=@code_package.zip'",
-                        returnStdout: true
-                    ).trim()
-                    def rawParserJson = readJSON text: rawParserResponse
-                    if (!rawParserJson.nodes) {
-                        error "Raw Parser Error: No nodes found."
-                    }
-                    writeFile file: 'ast_raw.json', text: rawParserResponse
-                    echo ">>> Raw AST saved. (Nodes: ${rawParserJson.nodes.size()}, Benchmark: ${rawParserJson.benchmark})"
                 }
             }
         }
 
+        // ================================================================
+        // Stage 2: Tree-sitter 데이터를 2개의 백엔드로 전송
+        //   - V1 Relational (13001): 구조 단위 정규화 저장
+        //   - V2 JSON       (13002): JSON 통째 저장
+        // ================================================================
+        stage('Send AST to Backends') {
+            parallel {
+                // ── V1: Relational AST 백엔드 (13001)
+                stage('V1 - Relational AST') {
+                    steps {
+                        script {
+                            echo ">>> Sending Tree-sitter AST to Relational Backend (V1:13001)..."
+                            def treesitterAst = readJSON(file: 'ast_treesitter.json')
+                            
+                            def relationalPayload = [
+                                jenkinsJobName: env.JOB_NAME,
+                                nodes         : treesitterAst.nodes // 백엔드 DTO와 일치
+                            ]
+                            writeJSON file: 'payload_relational.json', json: relationalPayload
+
+                            def relationalStatus = sh(
+                                script: """
+                                    curl -s -o /dev/null -w '%{http_code}' \
+                                    -X POST "${env.RELATIONAL_BACKEND_URL}/ast-data" \
+                                    -H "Content-Type: application/json" \
+                                    -d @payload_relational.json
+                                """,
+                                returnStdout: true
+                            ).trim()
+
+                            if (relationalStatus != '200' && relationalStatus != '201') {
+                                error "Relational Backend responded with HTTP ${relationalStatus}"
+                            }
+                            echo ">>> Relational Backend accepted (HTTP ${relationalStatus})"
+                        }
+                    }
+                }
+
+                // ── V2: JSON AST 백엔드 (13002)
+                stage('V2 - JSON AST') {
+                    steps {
+                        script {
+                            echo ">>> Sending Tree-sitter AST to JSON Backend (V2:13002)..."
+                            def treesitterAst = readJSON(file: 'ast_treesitter.json')
+
+                            def jsonPayload = [
+                                jenkinsJobName: env.JOB_NAME,
+                                nodes         : treesitterAst.nodes // JSON 컬럼에 직렬화 저장됨
+                            ]
+                            writeJSON file: 'payload_json.json', json: jsonPayload
+
+                            def jsonStatus = sh(
+                                script: """
+                                    curl -s -o /dev/null -w '%{http_code}' \
+                                    -X POST "${env.JSON_BACKEND_URL}/ast-data" \
+                                    -H "Content-Type: application/json" \
+                                    -d @payload_json.json
+                                """,
+                                returnStdout: true
+                            ).trim()
+
+                            if (jsonStatus != '200' && jsonStatus != '201') {
+                                error "JSON Backend responded with HTTP ${jsonStatus}"
+                            }
+                            echo ">>> JSON Backend accepted (HTTP ${jsonStatus})"
+                        }
+                    }
+                }
+            }
+        }
+
+        // ================================================================
+        // Stage 3: SonarQube 분석 + Quality Gate
+        // ================================================================
         stage('SonarQube & Quality Gate') {
             steps {
                 script {
@@ -89,6 +154,9 @@ pipeline {
             }   
         }
 
+        // ================================================================
+        // Stage 4: PyExamine + 통합 리포트 → 기존 백엔드(13000)
+        // ================================================================
         stage('PyExamine & Integrated Report') {
             steps {
                 script {
@@ -100,28 +168,23 @@ pipeline {
 
                     def rawSmellResults = readJSON text: pyExamineResponse
                     def treesitterAst = readJSON file: 'ast_treesitter.json'
-                    def rawAst = readJSON file: 'ast_raw.json'
                     
-                    // [핵심] 모든 데이터를 하나로 결합
+                    // 통합 페이로드 (AST는 이미 V1/V2로 전송됨, 여기선 레퍼런스 수준으로 포함)
                     def mergedPayload = [
-                        teamName: "stable-baselines3", 
-                        jenkinsJobName: env.JOB_NAME,
+                        teamName       : "stable-baselines3", 
+                        jenkinsJobName : env.JOB_NAME,
                         sonarProjectKey: env.SONAR_PROJECT_KEY,
                         analysis: [
-                            jobName: env.JOB_NAME,
-                            buildNumber: env.BUILD_NUMBER.toInteger(),
-                            status: qualityGateResult.status, // SonarQube 결과 반영
-                            buildUrl: env.BUILD_URL,
-                            commitHash: sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
+                            jobName        : env.JOB_NAME,
+                            buildNumber    : env.BUILD_NUMBER.toInteger(),
+                            status         : qualityGateResult.status,
+                            buildUrl       : env.BUILD_URL,
+                            commitHash     : sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
                             pyExamineResult: rawSmellResults,
-                            astResults: treesitterAst.nodes // AST 데이터 포함
-                        ],
-                        astData: [
-                            treesitter: treesitterAst,
-                            raw: rawAst
+                            astResults     : treesitterAst.nodes
                         ]
                     ]
-                    echo ">>> Merged Payload: ${mergedPayload}"
+                    echo ">>> Merged Payload ready."
                     writeJSON file: 'final_payload.json', json: mergedPayload
                     
                     echo ">>> Sending Integrated Payload to Backend..."
