@@ -79,7 +79,7 @@ pipeline {
                             def relationalStatus = sh(
                                 script: """
                                     curl -s -o /dev/null -w '%{http_code}' \
-                                    -X POST "${env.RELATIONAL_BACKEND_URL}/ast-data" \
+                                    -X POST "${env.RELATIONAL_BACKEND_URL}/ast-data/relational" \
                                     -H "Content-Type: application/json" \
                                     -d @payload_relational.json
                                 """,
@@ -110,7 +110,7 @@ pipeline {
                             def jsonStatus = sh(
                                 script: """
                                     curl -s -o /dev/null -w '%{http_code}' \
-                                    -X POST "${env.JSON_BACKEND_URL}/ast-data" \
+                                    -X POST "${env.JSON_BACKEND_URL}/ast-data/json" \
                                     -H "Content-Type: application/json" \
                                     -d @payload_json.json
                                 """,
