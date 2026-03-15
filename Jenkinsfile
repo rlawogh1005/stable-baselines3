@@ -157,45 +157,45 @@ pipeline {
         // ================================================================
         // Stage 4: PyExamine + 통합 리포트 → 기존 백엔드(13000)
         // ================================================================
-        stage('PyExamine & Integrated Report') {
-            steps {
-                script {
-                    echo ">>> Starting PyExamine Analysis..."
-                    def pyExamineResponse = sh(
-                        script: "curl -s -X POST '${env.PYEXAMINE_URL}' -F 'file=@code_package.zip'", 
-                        returnStdout: true
-                    ).trim()
+        // stage('PyExamine & Integrated Report') {
+        //     steps {
+        //         script {
+        //             echo ">>> Starting PyExamine Analysis..."
+        //             def pyExamineResponse = sh(
+        //                 script: "curl -s -X POST '${env.PYEXAMINE_URL}' -F 'file=@code_package.zip'", 
+        //                 returnStdout: true
+        //             ).trim()
 
-                    def rawSmellResults = readJSON text: pyExamineResponse
-                    def treesitterAst = readJSON file: 'ast_treesitter.json'
+        //             def rawSmellResults = readJSON text: pyExamineResponse
+        //             def treesitterAst = readJSON file: 'ast_treesitter.json'
                     
-                    // 통합 페이로드 (AST는 이미 V1/V2로 전송됨, 여기선 레퍼런스 수준으로 포함)
-                    def mergedPayload = [
-                        teamName       : "stable-baselines3", 
-                        jenkinsJobName : env.JOB_NAME,
-                        sonarProjectKey: env.SONAR_PROJECT_KEY,
-                        analysis: [
-                            jobName        : env.JOB_NAME,
-                            buildNumber    : env.BUILD_NUMBER.toInteger(),
-                            status         : qualityGateResult.status,
-                            buildUrl       : env.BUILD_URL,
-                            commitHash     : sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
-                            pyExamineResult: rawSmellResults,
-                            astResults     : treesitterAst.nodes
-                        ]
-                    ]
-                    echo ">>> Merged Payload ready."
-                    writeJSON file: 'final_payload.json', json: mergedPayload
+        //             // 통합 페이로드 (AST는 이미 V1/V2로 전송됨, 여기선 레퍼런스 수준으로 포함)
+        //             def mergedPayload = [
+        //                 teamName       : "stable-baselines3", 
+        //                 jenkinsJobName : env.JOB_NAME,
+        //                 sonarProjectKey: env.SONAR_PROJECT_KEY,
+        //                 analysis: [
+        //                     jobName        : env.JOB_NAME,
+        //                     buildNumber    : env.BUILD_NUMBER.toInteger(),
+        //                     status         : qualityGateResult.status,
+        //                     buildUrl       : env.BUILD_URL,
+        //                     commitHash     : sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
+        //                     pyExamineResult: rawSmellResults,
+        //                     astResults     : treesitterAst.nodes
+        //                 ]
+        //             ]
+        //             echo ">>> Merged Payload ready."
+        //             writeJSON file: 'final_payload.json', json: mergedPayload
                     
-                    echo ">>> Sending Integrated Payload to Backend..."
-                    sh """
-                        curl -X POST "${env.SWV_BACKEND_URL}/team-projects" \
-                        -H "Content-Type: application/json" \
-                        -d @final_payload.json
-                    """
-                }
-            }
-        }
+        //             echo ">>> Sending Integrated Payload to Backend..."
+        //             sh """
+        //                 curl -X POST "${env.SWV_BACKEND_URL}/team-projects" \
+        //                 -H "Content-Type: application/json" \
+        //                 -d @final_payload.json
+        //             """
+        //         }
+        //     }
+        // }
     }
 
     post {
