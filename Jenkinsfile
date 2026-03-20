@@ -10,8 +10,8 @@ pipeline {
 
     environment {
         SWV_BACKEND_URL='http://codevi-backend:13000/api'
-        RELATIONAL_BACKEND_URL='http://codevi-backend-relational:13001/api'
-        JSON_BACKEND_URL='http://codevi-backend-json:13002/api'
+        // RELATIONAL_BACKEND_URL='http://codevi-backend:13000/api'
+        // JSON_BACKEND_URL='http://codevi-backend-json:13002/api'
         PYEXAMINE_URL='http://pyexamine-service:8000/analyze'
         TREESITTER_PARSER_URL='http://codevi-parser-treesitter:3001/analyze'
         SONAR_PROJECT_KEY='stable-baselines3'
@@ -58,16 +58,16 @@ pipeline {
 
         // ================================================================
         // Stage 2: Tree-sitter 데이터를 2개의 백엔드로 전송
-        //   - V1 Relational (13001): 구조 단위 정규화 저장
+        //   - V1 Relational (13000): 구조 단위 정규화 저장
         //   - V2 JSON       (13002): JSON 통째 저장
         // ================================================================
         stage('Send AST to Backends') {
             parallel {
-                // ── V1: Relational AST 백엔드 (13001)
+                // ── V1: Relational AST 백엔드 (13000)
                 stage('V1 - Relational AST') {
                     steps {
                         script {
-                            echo ">>> Sending Tree-sitter AST to Relational Backend (V1:13001)..."
+                            echo ">>> Sending Tree-sitter AST to Relational Backend (V1:13000)..."
                             def treesitterAst = readJSON(file: 'ast_treesitter.json')
                             
                             def relationalPayload = [
@@ -79,7 +79,7 @@ pipeline {
                             def relationalStatus = sh(
                                 script: """
                                     curl -s -o /dev/null -w '%{http_code}' \
-                                    -X POST "${env.RELATIONAL_BACKEND_URL}/ast-data/relational" \
+                                    -X POST "${env.SWV_BACKEND_URL}/ast-data/relational" \
                                     -H "Content-Type: application/json" \
                                     -d @payload_relational.json
                                 """,
@@ -94,36 +94,36 @@ pipeline {
                     }
                 }
 
-                // ── V2: JSON AST 백엔드 (13002)
-                stage('V2 - JSON AST') {
-                    steps {
-                        script {
-                            echo ">>> Sending Tree-sitter AST to JSON Backend (V2:13002)..."
-                            def treesitterAst = readJSON(file: 'ast_treesitter.json')
+                // ── V2: Legacy, JSON AST 백엔드 (13002) - 사용하지 않음, 추후 HDD 장착 후 확장 시 사용 예정
+                // stage('V2 - JSON AST') {
+                //     steps {
+                //         script {
+                //             echo ">>> Sending Tree-sitter AST to JSON Backend (V2:13002)..."
+                //             def treesitterAst = readJSON(file: 'ast_treesitter.json')
 
-                            def jsonPayload = [
-                                jenkinsJobName: env.JOB_NAME,
-                                nodes         : treesitterAst.nodes // JSON 컬럼에 직렬화 저장됨
-                            ]
-                            writeJSON file: 'payload_json.json', json: jsonPayload
+                //             def jsonPayload = [
+                //                 jenkinsJobName: env.JOB_NAME,
+                //                 nodes         : treesitterAst.nodes // JSON 컬럼에 직렬화 저장됨
+                //             ]
+                //             writeJSON file: 'payload_json.json', json: jsonPayload
 
-                            def jsonStatus = sh(
-                                script: """
-                                    curl -s -o /dev/null -w '%{http_code}' \
-                                    -X POST "${env.JSON_BACKEND_URL}/ast-data/json" \
-                                    -H "Content-Type: application/json" \
-                                    -d @payload_json.json
-                                """,
-                                returnStdout: true
-                            ).trim()
+                //             def jsonStatus = sh(
+                //                 script: """
+                //                     curl -s -o /dev/null -w '%{http_code}' \
+                //                     -X POST "${env.JSON_BACKEND_URL}/ast-data/json" \
+                //                     -H "Content-Type: application/json" \
+                //                     -d @payload_json.json
+                //                 """,
+                //                 returnStdout: true
+                //             ).trim()
 
-                            if (jsonStatus != '200' && jsonStatus != '201') {
-                                error "JSON Backend responded with HTTP ${jsonStatus}"
-                            }
-                            echo ">>> JSON Backend accepted (HTTP ${jsonStatus})"
-                        }
-                    }
-                }
+                //             if (jsonStatus != '200' && jsonStatus != '201') {
+                //                 error "JSON Backend responded with HTTP ${jsonStatus}"
+                //             }
+                //             echo ">>> JSON Backend accepted (HTTP ${jsonStatus})"
+                //         }
+                //     }
+                // }
             }
         }
 
