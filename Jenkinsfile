@@ -9,15 +9,14 @@ pipeline {
     }
 
     environment {
-        SWV_BACKEND_URL='http://codevi-backend:13000/api'
-        // RELATIONAL_BACKEND_URL='http://codevi-backend:13000/api'
-        // JSON_BACKEND_URL='http://codevi-backend-json:13002/api'
-        PYEXAMINE_URL='http://pyexamine-service:8000/analyze'
-        TREESITTER_PARSER_URL='http://codevi-parser-treesitter:3001/analyze'
-        SONAR_PROJECT_KEY='stable-baselines3'
-        SONAR_SERVER='SonarQube-Server'
-        SONAR_CREDENTIALS='SONAR_QUBE_TOKEN'
+        SWV_BACKEND_URL="${env.SWV_BACKEND_URL}"
+        // PYEXAMINE_URL="${env.PYEXAMINE_URL}"
+        TREESITTER_PARSER_URL="${env.TREESITTER_PARSER_URL}"
+        // SONAR_PROJECT_KEY="${env.SONAR_PROJECT_KEY}"
+        // SONAR_SERVER="${env.SONAR_SERVER}"
+        // SONAR_CREDENTIALS="${env.SONAR_CREDENTIALS}"
         PYTHONIOENCODING='utf-8'
+        GITHUB_TOKEN="${env.GITHUB_TOKEN}"
     }
     
     tools {
@@ -57,145 +56,79 @@ pipeline {
         }
 
         // ================================================================
-        // Stage 2: Tree-sitter 데이터를 2개의 백엔드로 전송
-        //   - V1 Relational (13000): 구조 단위 정규화 저장
-        //   - V2 JSON       (13002): JSON 통째 저장
+        // Stage 2: Sync Hierarchical Data to Users Module
         // ================================================================
-        stage('Send AST to Backends') {
-            parallel {
-                // ── V1: Relational AST 백엔드 (13000)
-                stage('V1 - Relational AST') {
-                    steps {
-                        script {
-                            echo ">>> Sending Tree-sitter AST to Relational Backend (V1:13000)..."
-                            def treesitterAst = readJSON(file: 'ast_treesitter.json')
-                            
-                            def relationalPayload = [
-                                jenkinsJobName: env.JOB_NAME,
-                                nodes         : treesitterAst.nodes // 백엔드 DTO와 일치
-                            ]
-                            writeJSON file: 'payload_relational.json', json: relationalPayload
-
-                            def relationalStatus = sh(
-                                script: """
-                                    curl -s -o /dev/null -w '%{http_code}' \
-                                    -X POST "${env.SWV_BACKEND_URL}/ast-data/relational" \
-                                    -H "Content-Type: application/json" \
-                                    -d @payload_relational.json
-                                """,
-                                returnStdout: true
-                            ).trim()
-
-                            if (relationalStatus != '200' && relationalStatus != '201') {
-                                error "Relational Backend responded with HTTP ${relationalStatus}"
-                            }
-                            echo ">>> Relational Backend accepted (HTTP ${relationalStatus})"
-                        }
-                    }
-                }
-
-                // ── V2: Legacy, JSON AST 백엔드 (13002) - 사용하지 않음, 추후 HDD 장착 후 확장 시 사용 예정
-                // stage('V2 - JSON AST') {
-                //     steps {
-                //         script {
-                //             echo ">>> Sending Tree-sitter AST to JSON Backend (V2:13002)..."
-                //             def treesitterAst = readJSON(file: 'ast_treesitter.json')
-
-                //             def jsonPayload = [
-                //                 jenkinsJobName: env.JOB_NAME,
-                //                 nodes         : treesitterAst.nodes // JSON 컬럼에 직렬화 저장됨
-                //             ]
-                //             writeJSON file: 'payload_json.json', json: jsonPayload
-
-                //             def jsonStatus = sh(
-                //                 script: """
-                //                     curl -s -o /dev/null -w '%{http_code}' \
-                //                     -X POST "${env.JSON_BACKEND_URL}/ast-data/json" \
-                //                     -H "Content-Type: application/json" \
-                //                     -d @payload_json.json
-                //                 """,
-                //                 returnStdout: true
-                //             ).trim()
-
-                //             if (jsonStatus != '200' && jsonStatus != '201') {
-                //                 error "JSON Backend responded with HTTP ${jsonStatus}"
-                //             }
-                //             echo ">>> JSON Backend accepted (HTTP ${jsonStatus})"
-                //         }
-                //     }
-                // }
-            }
-        }
-
-        // ================================================================
-        // Stage 3: SonarQube 분석 + Quality Gate
-        // ================================================================
-        stage('SonarQube & Quality Gate') {
+        stage('Sync CI Hierarchical Data') {
             steps {
                 script {
-                    sh 'apt-get update && apt-get install -y default-jre zip curl'
-                    sh 'git config --global --add safe.directory "*"'
-                    if (fileExists('requirements.txt')) {
-                        sh 'pip install -r requirements.txt'
-                    }
+                    echo ">>> Fetching GitHub Collaborators..."
+                    def repoOwner = env.REPO_OWNER
+                    def repoName = env.REPO_NAME
                     
-                    def scannerHome = tool 'SonarScanner-Latest'
-                    withSonarQubeEnv(env.SONAR_SERVER) {
-                        sh """
-                            "${scannerHome}/bin/sonar-scanner" \
-                            -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
-                            -Dsonar.sources=. \
-                            -Dsonar.language=py \
-                            -Dsonar.python.version=3.10
-                        """
+                    def collaboratorsResponse = sh(
+                        script: """
+                            curl -s -H "Authorization: token \${GITHUB_TOKEN}" \
+                                 -H "Accept: application/vnd.github.v3+json" \
+                                 https://api.github.com/repos/${repoOwner}/${repoName}/collaborators
+                        """,
+                        returnStdout: true
+                    ).trim()
+                    
+                    def collaboratorsJson = []
+                    if (collaboratorsResponse && collaboratorsResponse.startsWith('[')) {
+                        def rawCollabs = readJSON text: collaboratorsResponse
+                        // Map to CreateUserDto[] format
+                        rawCollabs.each { collab ->
+                            collaboratorsJson.add([
+                                githubUid: collab.id,
+                                username: collab.login,
+                                email: collab.email ?: "${collab.login}@github.dummy.com"
+                            ])
+                        }
+                    } else {
+                        echo ">>> Warning: Failed to fetch collaborators or empty. Response: ${collaboratorsResponse}"
                     }
-                    qualityGateResult = waitForQualityGate abortPipeline: true, credentialsId: env.SONAR_CREDENTIALS
+
+                    echo ">>> Merging Hierarchical Payload..."
+                    def treesitterAst = readJSON file: 'ast_treesitter.json'
+                    def commitHash = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+
+                    def payload = [
+                        users: collaboratorsJson,
+                        teamProject: [
+                            teamName: "stable-baselines3",
+                            jenkinsJobName: env.JOB_NAME,
+                            sonarProjectKey: env.SONAR_PROJECT_KEY
+                        ],
+                        buildReport: [
+                            buildNumber: env.BUILD_NUMBER.toInteger(),
+                            buildUrl: env.BUILD_URL ?: "UNKNOWN_URL",
+                            status: qualityGateResult ? qualityGateResult.status : "UNKNOWN",
+                            commitHash: commitHash
+                        ],
+                        astNodes: treesitterAst.nodes
+                    ]
+                    
+                    writeJSON file: 'payload_hierarchical.json', json: payload
+
+                    echo ">>> Sending Hierarchical Payload to Users Module..."
+                    def syncStatus = sh(
+                        script: """
+                            curl -s -o /dev/null -w '%{http_code}' \
+                            -X POST "${env.SWV_BACKEND_URL}/users/sync-ci" \
+                            -H "Content-Type: application/json" \
+                            -d @payload_hierarchical.json
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    if (syncStatus != '200' && syncStatus != '201') {
+                        error "Users Module Sync responded with HTTP ${syncStatus}"
+                    }
+                    echo ">>> Users Module Sync accepted (HTTP ${syncStatus})"
                 }
-            }   
+            }
         }
-
-        // ================================================================
-        // Stage 4: PyExamine + 통합 리포트 → 기존 백엔드(13000)
-        // ================================================================
-        // stage('PyExamine & Integrated Report') {
-        //     steps {
-        //         script {
-        //             echo ">>> Starting PyExamine Analysis..."
-        //             def pyExamineResponse = sh(
-        //                 script: "curl -s -X POST '${env.PYEXAMINE_URL}' -F 'file=@code_package.zip'", 
-        //                 returnStdout: true
-        //             ).trim()
-
-        //             def rawSmellResults = readJSON text: pyExamineResponse
-        //             def treesitterAst = readJSON file: 'ast_treesitter.json'
-                    
-        //             // 통합 페이로드 (AST는 이미 V1/V2로 전송됨, 여기선 레퍼런스 수준으로 포함)
-        //             def mergedPayload = [
-        //                 teamName       : "stable-baselines3", 
-        //                 jenkinsJobName : env.JOB_NAME,
-        //                 sonarProjectKey: env.SONAR_PROJECT_KEY,
-        //                 analysis: [
-        //                     jobName        : env.JOB_NAME,
-        //                     buildNumber    : env.BUILD_NUMBER.toInteger(),
-        //                     status         : qualityGateResult.status,
-        //                     buildUrl       : env.BUILD_URL,
-        //                     commitHash     : sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
-        //                     pyExamineResult: rawSmellResults,
-        //                     astResults     : treesitterAst.nodes
-        //                 ]
-        //             ]
-        //             echo ">>> Merged Payload ready."
-        //             writeJSON file: 'final_payload.json', json: mergedPayload
-                    
-        //             echo ">>> Sending Integrated Payload to Backend..."
-        //             sh """
-        //                 curl -X POST "${env.SWV_BACKEND_URL}/team-projects" \
-        //                 -H "Content-Type: application/json" \
-        //                 -d @final_payload.json
-        //             """
-        //         }
-        //     }
-        // }
     }
 
     post {
