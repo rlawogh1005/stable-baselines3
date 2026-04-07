@@ -8,29 +8,29 @@ pipeline {
         }
     }
 
-    stage('Setup Environment') {
-        steps {
-            script {
-                checkout scm // .env 파일을 읽기 위해 먼저 git checkout이 필요합니다.
-                if (fileExists('.env')) {
-                    echo ">>> [SETUP] Reading .env file and injecting to environment..."
-                    def props = readProperties file: '.env'
-                    props.each { key, value ->
-                        env."${key}" = value
-                        echo "Successfully loaded: ${key}"
-                    }
-                } else {
-                    echo ">>> [WARNING] .env file not found. Falling back to Jenkins environment."
-                }
-            }
-        }
-    }
-
     tools {
         'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScanner-Latest'
     }
 
     stages {
+        stage('Setup Environment') {
+            steps {
+                script {
+                    checkout scm // .env 파일을 읽기 위해 먼저 git checkout이 필요합니다.
+                    if (fileExists('.env')) {
+                        echo ">>> [SETUP] Reading .env file and injecting to environment..."
+                        def props = readProperties file: '.env'
+                        props.each { key, value ->
+                            env."${key}" = value
+                            echo "Successfully loaded: ${key}"
+                        }
+                    } else {
+                        echo ">>> [WARNING] .env file not found. Falling back to Jenkins environment."
+                    }
+                }
+            }
+        }
+
         // ================================================================
         // Stage 1: 소스코드 zip + Tree-sitter 파서 호출
         // ================================================================
