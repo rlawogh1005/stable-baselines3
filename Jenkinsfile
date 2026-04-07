@@ -12,24 +12,37 @@ pipeline {
         'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScanner-Latest'
     }
 
+    environment {
+        SWV_BACKEND_URL='http://codevi-backend:13000/api'
+        TREESITTER_PARSER_URL='http://codevi-parser-treesitter:3001/analyze'
+        
+        REPO_OWNER = 'rlawogh1005'
+        REPO_NAME = 'stable-baselines3'
+        
+        // 🛡️ 테스트용 임시 토큰 (발급받으신 ghp_... 를 여기에 직접 적어주세요)
+        GITHUB_TOKEN = credentials('GITHUB_TOKEN_FOR_ANALYZE_PROJECT')
+        
+        PYTHONIOENCODING='utf-8'
+    }
+
     stages {
-        stage('Setup Environment') {
-            steps {
-                script {
-                    checkout scm // .env 파일을 읽기 위해 먼저 git checkout이 필요합니다.
-                    if (fileExists('.env')) {
-                        echo ">>> [SETUP] Reading .env file and injecting to environment..."
-                        def props = readProperties file: '.env'
-                        props.each { key, value ->
-                            env."${key}" = value
-                            echo "Successfully loaded: ${key}"
-                        }
-                    } else {
-                        echo ">>> [WARNING] .env file not found. Falling back to Jenkins environment."
-                    }
-                }
-            }
-        }
+        // stage('Setup Environment') {
+        //     steps {
+        //         script {
+        //             checkout scm // .env 파일을 읽기 위해 먼저 git checkout이 필요합니다.
+        //             if (fileExists('.env')) {
+        //                 echo ">>> [SETUP] Reading .env file and injecting to environment..."
+        //                 def props = readProperties file: '.env'
+        //                 props.each { key, value ->
+        //                     env."${key}" = value
+        //                     echo "Successfully loaded: ${key}"
+        //                 }
+        //             } else {
+        //                 echo ">>> [WARNING] .env file not found. Falling back to Jenkins environment."
+        //             }
+        //         }
+        //     }
+        // }
 
         // ================================================================
         // Stage 1: 소스코드 zip + Tree-sitter 파서 호출
@@ -46,7 +59,7 @@ pipeline {
 
                     echo ">>> Sending to Tree-sitter Parser..."
                     def treesitterResponse = sh(
-                        script: "curl -s -X POST '${env.TREESITTER_PARSER_URL}' -F 'file=@code_package.zip'",
+                        script: "curl -s -X POST '${TREESITTER_PARSER_URL}' -F 'file=@code_package.zip'",
                         returnStdout: true
                     ).trim()
 
@@ -67,13 +80,13 @@ pipeline {
         stage('Sync CI Hierarchical Data') {
             steps {
                 script {
-                    echo ">>> [SYNC] Fetching Collaborators for ${env.REPO_OWNER}/${env.REPO_NAME}..."
-                    def repoOwner = env.REPO_OWNER
-                    def repoName = env.REPO_NAME
+                    echo ">>> [SYNC] Fetching Collaborators for ${REPO_OWNER}/${REPO_NAME}..."
+                    def repoOwner = REPO_OWNER
+                    def repoName = REPO_NAME
                     
                     def collaboratorsResponse = sh(
                         script: """
-                            curl -s -H "Authorization: token ${env.GITHUB_TOKEN}" \
+                            curl -s -H "Authorization: token ${GITHUB_TOKEN}" \
                                  -H "Accept: application/vnd.github.v3+json" \
                                  https://api.github.com/repos/${repoOwner}/${repoName}/collaborators
                         """,
