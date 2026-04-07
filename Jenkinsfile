@@ -8,17 +8,24 @@ pipeline {
         }
     }
 
-    environment {
-        SWV_BACKEND_URL="${env.SWV_BACKEND_URL}"
-        // PYEXAMINE_URL="${env.PYEXAMINE_URL}"
-        TREESITTER_PARSER_URL="${env.TREESITTER_PARSER_URL}"
-        // SONAR_PROJECT_KEY="${env.SONAR_PROJECT_KEY}"
-        // SONAR_SERVER="${env.SONAR_SERVER}"
-        // SONAR_CREDENTIALS="${env.SONAR_CREDENTIALS}"
-        PYTHONIOENCODING='utf-8'
-        GITHUB_TOKEN="${env.GITHUB_TOKEN}"
+    stage('Setup Environment') {
+        steps {
+            script {
+                checkout scm // .env 파일을 읽기 위해 먼저 git checkout이 필요합니다.
+                if (fileExists('.env')) {
+                    echo ">>> [SETUP] Reading .env file and injecting to environment..."
+                    def props = readProperties file: '.env'
+                    props.each { key, value ->
+                        env."${key}" = value
+                        echo "Successfully loaded: ${key}"
+                    }
+                } else {
+                    echo ">>> [WARNING] .env file not found. Falling back to Jenkins environment."
+                }
+            }
+        }
     }
-    
+
     tools {
         'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScanner-Latest'
     }
@@ -34,10 +41,9 @@ pipeline {
                     sh 'apt-get update && apt-get install -y zip curl default-jre'
                     sh 'git config --global --add safe.directory "*"'
 
-                    echo ">>> Zipping Source Code..."
+                    echo ">>> [INIT] Zipping codebase and sending to Parser at ${env.TREESITTER_PARSER_URL}..."
                     sh 'zip -r code_package.zip . -x "*.git*" "node_modules/*" "dist/*" "__pycache__/*"'
 
-                    // ── Tree-sitter 파서 호출 (유일한 파서)
                     echo ">>> Sending to Tree-sitter Parser..."
                     def treesitterResponse = sh(
                         script: "curl -s -X POST '${env.TREESITTER_PARSER_URL}' -F 'file=@code_package.zip'",
@@ -61,13 +67,13 @@ pipeline {
         stage('Sync CI Hierarchical Data') {
             steps {
                 script {
-                    echo ">>> Fetching GitHub Collaborators..."
+                    echo ">>> [SYNC] Fetching Collaborators for ${env.REPO_OWNER}/${env.REPO_NAME}..."
                     def repoOwner = env.REPO_OWNER
                     def repoName = env.REPO_NAME
                     
                     def collaboratorsResponse = sh(
                         script: """
-                            curl -s -H "Authorization: token \${GITHUB_TOKEN}" \
+                            curl -s -H "Authorization: token ${env.GITHUB_TOKEN}" \
                                  -H "Accept: application/vnd.github.v3+json" \
                                  https://api.github.com/repos/${repoOwner}/${repoName}/collaborators
                         """,
