@@ -93,16 +93,11 @@ pipeline {
                         returnStdout: true
                     ).trim()
                     
-                    def collaboratorsJson = []
+                    def collaboratorUsernames = []
                     if (collaboratorsResponse && collaboratorsResponse.startsWith('[')) {
                         def rawCollabs = readJSON text: collaboratorsResponse
-                        // Map to CreateUserDto[] format
                         rawCollabs.each { collab ->
-                            collaboratorsJson.add([
-                                githubUid: collab.id,
-                                username: collab.login,
-                                email: collab.email ?: "${collab.login}@github.dummy.com"
-                            ])
+                            collaboratorUsernames.add(collab.login)
                         }
                     } else {
                         echo ">>> Warning: Failed to fetch collaborators or empty. Response: ${collaboratorsResponse}"
@@ -110,22 +105,23 @@ pipeline {
 
                     echo ">>> Merging Hierarchical Payload..."
                     def treesitterAst = readJSON file: 'ast_treesitter.json'
-                    def commitHash = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
 
                     def payload = [
-                        users: collaboratorsJson,
-                        teamProject: [
-                            teamName: "stable-baselines3",
+                        username: collaboratorUsernames,
+                        email: "${REPO_NAME}@codevi.dev",
+                        password: "securePass123!",
+                        passwordConfirm: "securePass123!",
+                        role: "student",
+                        ProjectDto: [
+                            teamName: REPO_NAME,
                             jenkinsJobName: env.JOB_NAME,
-                            sonarProjectKey: env.SONAR_PROJECT_KEY
-                        ],
-                        buildReport: [
-                            buildNumber: env.BUILD_NUMBER.toInteger(),
-                            buildUrl: env.BUILD_URL ?: "UNKNOWN_URL",
-                            status: qualityGateResult ? qualityGateResult.status : "UNKNOWN",
-                            commitHash: commitHash
-                        ],
-                        astNodes: treesitterAst.nodes
+                            sonarProjectKey: env.SONAR_PROJECT_KEY ?: "codevi:main",
+                            analysis: [
+                                buildNumber: env.BUILD_NUMBER.toInteger(),
+                                buildUrl: env.BUILD_URL ?: "UNKNOWN_URL"
+                            ],
+                            astNodes: treesitterAst.nodes
+                        ]
                     ]
                     
                     writeJSON file: 'payload_hierarchical.json', json: payload
