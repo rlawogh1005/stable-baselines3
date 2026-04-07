@@ -134,7 +134,7 @@ pipeline {
                     def syncStatus = sh(
                         script: """
                             curl -s -o /dev/null -w '%{http_code}' \
-                            -X POST "${env.SWV_BACKEND_URL}/users/sync-ci" \
+                            -X POST "${env.SWV_BACKEND_URL}/users/build-report" \
                             -H "Content-Type: application/json" \
                             -d @payload_hierarchical.json
                         """,
