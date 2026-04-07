@@ -86,7 +86,7 @@ pipeline {
                     
                     def collaboratorsResponse = sh(
                         script: """
-                            curl -s -H "Authorization: token ${GITHUB_TOKEN}" \
+                            curl -s -H "Authorization: token \${GITHUB_TOKEN}" \
                                  -H "Accept: application/vnd.github.v3+json" \
                                  https://api.github.com/repos/${repoOwner}/${repoName}/collaborators
                         """,
