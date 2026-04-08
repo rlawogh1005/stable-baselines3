@@ -94,10 +94,12 @@ pipeline {
                     ).trim()
                     
                     def collaboratorUsernames = []
+                    def collaboratorUids = []
                     if (collaboratorsResponse && collaboratorsResponse.startsWith('[')) {
                         def rawCollabs = readJSON text: collaboratorsResponse
                         rawCollabs.each { collab ->
                             collaboratorUsernames.add(collab.login)
+                            collaboratorUids.add(collab.id)
                         }
                     } else {
                         echo ">>> Warning: Failed to fetch collaborators or empty. Response: ${collaboratorsResponse}"
@@ -108,6 +110,7 @@ pipeline {
 
                     def payload = [
                         username: collaboratorUsernames,
+                        githubUid: collaboratorUids,
                         ProjectDto: [
                             teamName: REPO_NAME,
                             jenkinsJobName: env.JOB_NAME,
