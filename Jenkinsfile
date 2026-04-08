@@ -108,10 +108,6 @@ pipeline {
 
                     def payload = [
                         username: collaboratorUsernames,
-                        email: "${REPO_NAME}@codevi.dev",
-                        password: "securePass123!",
-                        passwordConfirm: "securePass123!",
-                        role: "student",
                         ProjectDto: [
                             teamName: REPO_NAME,
                             jenkinsJobName: env.JOB_NAME,
